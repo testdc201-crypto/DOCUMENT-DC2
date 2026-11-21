@@ -63,8 +63,11 @@ tr[data-id]{cursor:pointer}tr[data-id]:hover{background:#f0f3f5}
 .fm{max-width:420px}
 #toast{position:fixed;right:16px;bottom:16px;z-index:30;display:flex;flex-direction:column;gap:6px}
 #toast div{background:#333;color:#fff;padding:9px 14px;border-left:5px solid #2e9d57;max-width:360px}#toast div.e{border-color:#d03a3a}
-#rt-status{font-size:11px;padding:2px 8px;border-radius:4px;margin-left:8px}
-#rt-status.on{background:#e8f5e9;color:#2e7d4f}#rt-status.off{background:#ffebee;color:#c62828}
+#rt-status{font-size:13px;font-weight:700;padding:4px 12px;border-radius:20px;margin-left:12px;display:inline-flex;align-items:center;gap:6px}
+#rt-status::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor}
+#rt-status.on{background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7}
+#rt-status.off{background:#ffebee;color:#b71c1c;border:1px solid #ef9a9a}
+#rt-status.connecting{background:#fff8e1;color:#f57f17;border:1px solid #ffe082}
 </style>
 </head>
 <body>
@@ -83,7 +86,7 @@ tr[data-id]{cursor:pointer}tr[data-id]:hover{background:#f0f3f5}
 <div class="wrap">
 <header>
 <h1 id="proj">DOCUMENT DC2</h1>
-<span id="rt-status" class="off">CONNECTING...</span>
+<span id="rt-status" class="connecting">CONNECTING...</span>
 <span class="sp"></span>
 <span id="hdr-st" class="ok">SAVED</span>
 <button id="bSave" class="pri" onclick="save()">SAVE CHANGES</button>
@@ -134,7 +137,6 @@ function fresh(){
 let saved = fresh();
 let W = CL(saved);
 let V='dash', CF=0, ZM=1, Q='', HIT=new Set(), editing=false, curF=null, DM={}, askFn=null, IMP=null;
-let isRemoteUpdate = false;
 let connected = false;
 
 const dirty = () => JSON.stringify(W) !== JSON.stringify(saved);
@@ -192,59 +194,53 @@ function ask(m,fn){
   show('ov2',`<div class="dlg"><h3>DELETE CONFIRMATION</h3><p>${E(m)}</p><div class="bar"><button class="pri" onclick="hide('ov2');askFn()">YES</button><button onclick="hide('ov2')">NO</button></div></div>`);
 }
 
-function dl(blob,name){
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+function updateStatus(state){
+  const el = $('rt-status');
+  if(!el) return;
+  if(state === 'live'){
+    el.textContent = 'LIVE · ONLINE';
+    el.className = 'on';
+    connected = true;
+  } else if(state === 'connecting'){
+    el.textContent = 'CONNECTING...';
+    el.className = 'connecting';
+  } else {
+    el.textContent = 'OFFLINE';
+    el.className = 'off';
+    connected = false;
+  }
 }
 
 /* ========== REALTIME LOAD / SAVE ========== */
 async function loadFromCloud(){
+  updateStatus('connecting');
   try{
     const {data, error} = await sb.from('dc2_data').select('data').eq('id','main').maybeSingle();
     if(error) throw error;
     if(data && data.data && data.data.folders && data.data.folders.length===54){
       saved = data.data;
       W = CL(saved);
-      connected = true;
-      updateStatus(true);
-      toast('Loaded from cloud');
+      updateStatus('live');
+      toast('Connected to cloud · Realtime ready');
     } else {
-      // first time - push fresh data
       const init = fresh();
-      await sb.from('dc2_data').upsert({id:'main', data:init, updated_at:new Date().toISOString()});
+      const {error: e2} = await sb.from('dc2_data').upsert({id:'main', data:init, updated_at:new Date().toISOString()});
+      if(e2) throw e2;
       saved = init;
       W = CL(saved);
-      connected = true;
-      updateStatus(true);
-      toast('Initialized cloud data');
+      updateStatus('live');
+      toast('Initialized cloud data · Realtime ready');
     }
   }catch(e){
-    console.error(e);
-    updateStatus(false);
-    toast('Cloud load failed - using local',1);
-    // fallback local
+    console.error('Cloud error:', e);
+    updateStatus('offline');
+    toast('Cloud connection failed: ' + (e.message || e), 1);
     try{
       const a = JSON.parse(localStorage.getItem('dc2_saved'));
       if(a && a.folders && a.folders.length===54){ saved=a; W=CL(saved); }
     }catch(x){}
   }
   render();
-}
-
-function updateStatus(ok){
-  const el = $('rt-status');
-  if(ok){
-    el.textContent = 'LIVE';
-    el.className = 'on';
-  } else {
-    el.textContent = 'OFFLINE';
-    el.className = 'off';
-  }
 }
 
 async function save(){
@@ -260,14 +256,13 @@ async function save(){
     });
     if(error) throw error;
     saved = CL(W);
-    // also keep local backup
     try{ localStorage.setItem('dc2_saved', JSON.stringify(W)); }catch(x){}
-    toast('SAVE SUCCESSFULLY (synced)');
+    toast('SAVE SUCCESSFULLY · Synced to all devices');
     render();
     return true;
   }catch(x){
     W.ts = old;
-    toast('SAVE FAILED: '+x.message,1);
+    toast('SAVE FAILED: ' + (x.message || x), 1);
     return false;
   }
 }
@@ -279,29 +274,33 @@ function discard(){
 
 addEventListener('beforeunload', e => { if(dirty()){ e.preventDefault(); e.returnValue=''; } });
 
-/* Realtime subscription */
 function startRealtime(){
-  sb.channel('dc2-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'dc2_data', filter: 'id=eq.main' }, payload => {
+  const channel = sb.channel('dc2-realtime')
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'dc2_data',
+      filter: 'id=eq.main'
+    }, (payload) => {
       if(payload.new && payload.new.data){
         const remote = payload.new.data;
-        // ignore if same as current saved (our own save)
         if(JSON.stringify(remote) === JSON.stringify(saved)) return;
-        isRemoteUpdate = true;
         saved = remote;
         W = CL(saved);
         editing = false;
         curF = null;
         hide('ov1'); hide('ov2');
         render();
-        toast('Updated from another device');
-        isRemoteUpdate = false;
+        toast('🔄 Updated from another device');
       }
     })
-    .subscribe(status => {
+    .subscribe((status, err) => {
+      console.log('Realtime status:', status, err);
       if(status === 'SUBSCRIBED'){
-        connected = true;
-        updateStatus(true);
+        updateStatus('live');
+      } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT'){
+        updateStatus('offline');
+        toast('Realtime connection issue', 1);
       }
     });
 }
@@ -326,7 +325,7 @@ function validateAll(){
   return '';
 }
 
-/* ========== VIEWS (same as original) ========== */
+/* ========== VIEWS ========== */
 function go(v){ V=v; if(v!='search') HIT=new Set(); render(); scrollTo(0,0); }
 
 function render(){
@@ -442,22 +441,19 @@ function chk(){
 }
 
 VW.bk = () => {
-  return `<div class="card"><h3>EXPORT</h3><p class="mt">Exports contain saved data only. Last saved: ${saved.ts?new Date(saved.ts).toLocaleString():'never'}</p><div class="bar"><button class="pri" onclick="expX()">EXPORT EXCEL</button></div></div>
-  <div class="card"><h3>IMPORT</h3><div class="bar"><button class="pri" onclick="$('imf').click()">IMPORT EXCEL</button><input id="imf" type="file" accept=".xlsx" hidden onchange="impFile(this)"><button onclick="tpl()">DOWNLOAD EXCEL TEMPLATE</button></div></div>
-  <div class="card"><h3>REALTIME STATUS</h3><p>Status: <b id="rt2">${connected?'LIVE':'OFFLINE'}</b></p><p class="mt">Data is synced automatically across all devices when you press SAVE CHANGES.</p></div>`;
+  return `<div class="card"><h3>EXPORT</h3><p class="mt">Last saved: ${saved.ts?new Date(saved.ts).toLocaleString():'never'}</p><div class="bar"><button class="pri" onclick="expX()">EXPORT EXCEL</button></div></div>
+  <div class="card"><h3>REALTIME STATUS</h3><p>Connection: <b>${connected ? 'LIVE · ONLINE' : 'OFFLINE'}</b></p><p class="mt">When you press SAVE CHANGES, data is pushed to the cloud and other open devices will update automatically.</p></div>`;
 };
 
 VW.set = () => {
   const s = W.settings;
   return `<div class="card"><h3>SETTINGS</h3><div class="fm">
   <label>Project name</label><input id="s-name" value="${E(s.name)}">
-  <label>Near-full threshold, % of capacity (${s.near==null?'NOT SET':s.near+'%'})</label><input id="s-near" type="number" min="1" max="100" value="${s.near==null?'':s.near}" placeholder="NOT SET">
-  <label>Full threshold, % of capacity (${s.full==null?'NOT SET':s.full+'%'})</label><input id="s-full" type="number" min="1" max="100" value="${s.full==null?'':s.full}" placeholder="NOT SET">
+  <label>Near-full threshold (%)</label><input id="s-near" type="number" min="1" max="100" value="${s.near==null?'':s.near}" placeholder="NOT SET">
+  <label>Full threshold (%)</label><input id="s-full" type="number" min="1" max="100" value="${s.full==null?'':s.full}" placeholder="NOT SET">
   <label>Date format</label><select id="s-fmt">${['DD/MM/YYYY','YYYY-MM-DD','DD MMM YYYY'].map(x=>`<option ${s.fmt==x?'selected':''}>${x}</option>`).join('')}</select>
   <label>Default folder color</label><input id="s-col" type="color" value="${s.color}">
-  <label><input type="checkbox" id="s-bak" style="width:auto" ${s.bak?'checked':''}> Create backup before Excel import</label>
-  </div><p class="mt">Folder capacity is set per folder with EDIT FOLDER.</p>
-  <div class="bar"><button class="pri" onclick="saveSet()">SAVE</button><button onclick="render()">CANCEL</button></div></div>`;
+  </div><div class="bar"><button class="pri" onclick="saveSet()">SAVE</button><button onclick="render()">CANCEL</button></div></div>`;
 };
 
 function saveSet(){
@@ -465,13 +461,12 @@ function saveSet(){
   if(!nm) return toast('PROJECT NAME REQUIRED',1);
   const g = i => { const v=$(i).value.trim(); if(v==='') return null; const n=+v; return Number.isInteger(n)&&n>=1&&n<=100?n:NaN; };
   const a=g('s-near'), b=g('s-full');
-  if(Number.isNaN(a)||Number.isNaN(b)) return toast('THRESHOLD MUST BE A WHOLE NUMBER 1-100',1);
-  if(a!=null && b!=null && a>=b) return toast('NEAR-FULL THRESHOLD MUST BE LOWER THAN FULL THRESHOLD',1);
-  Object.assign(W.settings,{name:nm,near:a,full:b,fmt:$('s-fmt').value,color:$('s-col').value,bak:$('s-bak').checked});
+  if(Number.isNaN(a)||Number.isNaN(b)) return toast('THRESHOLD MUST BE 1-100',1);
+  if(a!=null && b!=null && a>=b) return toast('NEAR must be lower than FULL',1);
+  Object.assign(W.settings,{name:nm,near:a,full:b,fmt:$('s-fmt').value,color:$('s-col').value});
   save();
 }
 
-/* Folder modal & document ops - simplified but functional */
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-id]');
   if(t) openF(t.dataset.id);
@@ -488,14 +483,14 @@ function fmodal(){
   const form = editing ? `<div class="card fm" style="max-width:none"><h3>EDIT FOLDER</h3>
     <label>Folder Name</label><input id="ef-name" value="${E(f.name)}">
     <label>Folder Number</label><input id="ef-no" type="number" min="1" value="${f.no}">
-    <label>Confidentiality Level</label><select id="ef-lv">${[['','Blank'],['CONFIDENTIAL','CONFIDENTIAL'],['SECRET','SECRET']].map(o=>`<option value="${o[0]}" ${f.level==o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
+    <label>Confidentiality</label><select id="ef-lv">${[['','Blank'],['CONFIDENTIAL','CONFIDENTIAL'],['SECRET','SECRET']].map(o=>`<option value="${o[0]}" ${f.level==o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
     <label>MAXIMUM CAPACITY</label><input id="ef-cap" type="number" min="1" value="${f.cap==null?'':f.cap}" placeholder="NOT SET">
-    <label>Folder Color</label><input id="ef-col" type="color" value="${f.color||W.settings.color}">
-    <p class="mt">Cabinet and shelf position cannot be changed.</p></div>` : '';
-  show('ov1',`<div class="dlg wide"><h3 style="font-size:18px">${E(f.name)} <span class="badge" style="background:${col}">${s.t}</span> <span class="${dirty()?'bad':'ok'}" style="font-size:12px">${dirty()?'UNSAVED CHANGES':'SAVED'}</span></h3>
-  <div class="kv">${kv('Cabinet',f.cab)}${kv('Shelf',SH[f.shelf])}${kv('Folder ID',f.id)}${kv('NO.',f.no)}${kv('Name',E(f.name))}${kv('Level',E(f.level)||'Blank')}${kv('Docs',f.docs.length)}${kv('Capacity',f.cap==null?'NOT SET':f.cap)}${kv('Status',s.t)}</div>${form}
+    <label>Color</label><input id="ef-col" type="color" value="${f.color||W.settings.color}">
+  </div>` : '';
+  show('ov1',`<div class="dlg wide"><h3 style="font-size:18px">${E(f.name)} <span class="badge" style="background:${col}">${s.t}</span></h3>
+  <div class="kv">${kv('Cabinet',f.cab)}${kv('Shelf',SH[f.shelf])}${kv('ID',f.id)}${kv('NO.',f.no)}${kv('Docs',f.docs.length)}${kv('Capacity',f.cap==null?'NOT SET':f.cap)}</div>${form}
   <div class="bar"><button class="pri" onclick="addDoc()">ADD DOCUMENT</button><button onclick="editF()">EDIT FOLDER</button><button class="pri" onclick="saveF()">SAVE</button><button onclick="cancelF()">CANCEL</button><span class="sp"></span><button onclick="closeF()">BACK</button></div>
-  <table><tr><th>#</th><th>Document Code</th><th>Date</th><th>Action</th></tr>${f.docs.map((d,i)=>`<tr><td>${i+1}</td><td>${E(d.code)}</td><td>${fd(d.date)}</td><td><button onclick="editDoc('${f.id}','${d.id}')">EDIT</button> <button onclick="delDoc('${f.id}','${d.id}')">DELETE</button></td></tr>`).join('')||'<tr><td colspan="4">No documents</td></tr>'}</table></div>`);
+  <table><tr><th>#</th><th>Code</th><th>Date</th><th>Action</th></tr>${f.docs.map((d,i)=>`<tr><td>${i+1}</td><td>${E(d.code)}</td><td>${fd(d.date)}</td><td><button onclick="editDoc('${f.id}','${d.id}')">EDIT</button> <button onclick="delDoc('${f.id}','${d.id}')">DELETE</button></td></tr>`).join('')||'<tr><td colspan="4">No documents</td></tr>'}</table></div>`);
 }
 
 function editF(){ editing=true; fmodal(); }
@@ -508,13 +503,11 @@ function saveF(){
     const nm=$('ef-name').value.trim(), no=+$('ef-no').value, cp=$('ef-cap').value.trim(), lv=$('ef-lv').value;
     if(!nm) return toast('FOLDER NAME REQUIRED',1);
     if(!Number.isInteger(no)||no<1) return toast('INVALID FOLDER NUMBER',1);
-    if(W.folders.some(x=>x!==f && x.cab==f.cab && x.shelf==f.shelf && x.no==no)) return toast('FOLDER NUMBER ALREADY EXISTS ON THIS SHELF',1);
+    if(W.folders.some(x=>x!==f && x.cab==f.cab && x.shelf==f.shelf && x.no==no)) return toast('FOLDER NUMBER EXISTS',1);
     let c=null;
-    if(cp!==''){ c=+cp; if(!Number.isInteger(c)||c<1) return toast('INVALID CAPACITY',1); if(c<f.docs.length) return toast('CAPACITY LOWER THAN CURRENT DOCS',1); }
-    if(c==null && f.docs.length) return toast('CAPACITY CANNOT BE CLEARED WHILE FOLDER HAS DOCUMENTS',1);
-    const cv=$('ef-col').value;
-    Object.assign(f,{name:nm,no,level:lv,cap:c});
-    if(cv != (f.color||W.settings.color)) f.color=cv;
+    if(cp!==''){ c=+cp; if(!Number.isInteger(c)||c<1) return toast('INVALID CAPACITY',1); if(c<f.docs.length) return toast('CAPACITY TOO LOW',1); }
+    if(c==null && f.docs.length) return toast('CANNOT CLEAR CAPACITY WITH DOCS',1);
+    Object.assign(f,{name:nm,no,level:lv,cap:c,color:$('ef-col').value});
     editing=false;
   }
   save();
@@ -524,84 +517,55 @@ const dupCode = (c,ex) => allDocs().some(x => x.d.id!=ex && x.d.code.toLowerCase
 
 function addDoc(){
   const f=cf();
-  if(!f.cap){ toast('FOLDER CAPACITY NOT SET - set it first (EDIT FOLDER)',1); return; }
+  if(!f.cap){ toast('Set capacity first (EDIT FOLDER)',1); return; }
   if(f.docs.length>=f.cap){ toast('FOLDER IS FULL',1); return; }
-  show('ov2',`<div class="dlg"><h3>ADD DOCUMENT</h3><label>Document Code</label><input id="dc"><label>Document Date</label><input id="dd" type="date"><div class="bar"><button class="pri" onclick="okAdd()">ADD</button><button onclick="hide('ov2')">CANCEL</button></div></div>`);
+  show('ov2',`<div class="dlg"><h3>ADD DOCUMENT</h3><label>Code</label><input id="dc"><label>Date</label><input id="dd" type="date"><div class="bar"><button class="pri" onclick="okAdd()">ADD</button><button onclick="hide('ov2')">CANCEL</button></div></div>`);
 }
 
 function okAdd(){
   const f=cf(), c=$('dc').value.trim(), d=$('dd').value;
-  if(!c) return toast('DOCUMENT CODE REQUIRED',1);
-  if(!d) return toast('DOCUMENT DATE REQUIRED',1);
-  if(dupCode(c)) return toast('DOCUMENT CODE ALREADY EXISTS',1);
-  if(f.docs.length>=f.cap) return toast('FOLDER IS FULL',1);
+  if(!c||!d) return toast('Code and Date required',1);
+  if(dupCode(c)) return toast('CODE ALREADY EXISTS',1);
   f.docs.push({id:uid(),code:c,date:d});
-  hide('ov2');
-  render();
-  toast('DOCUMENT ADDED (press SAVE to sync)');
+  hide('ov2'); render();
+  toast('Added · press SAVE to sync');
 }
 
 function editDoc(fid,did){
   const d = W.folders.find(f=>f.id==fid).docs.find(x=>x.id==did);
-  show('ov2',`<div class="dlg"><h3>EDIT DOCUMENT</h3><label>Document Code</label><input id="dc" value="${E(d.code)}"><label>Document Date</label><input id="dd" type="date" value="${d.date}"><div class="bar"><button class="pri" onclick="okEdit('${fid}','${did}')">OK</button><button onclick="hide('ov2')">CANCEL</button></div></div>`);
+  show('ov2',`<div class="dlg"><h3>EDIT</h3><label>Code</label><input id="dc" value="${E(d.code)}"><label>Date</label><input id="dd" type="date" value="${d.date}"><div class="bar"><button class="pri" onclick="okEdit('${fid}','${did}')">OK</button><button onclick="hide('ov2')">CANCEL</button></div></div>`);
 }
 
 function okEdit(fid,did){
   const d = W.folders.find(f=>f.id==fid).docs.find(x=>x.id==did);
   const c=$('dc').value.trim(), dt=$('dd').value;
-  if(!c) return toast('DOCUMENT CODE REQUIRED',1);
-  if(!dt) return toast('DOCUMENT DATE REQUIRED',1);
-  if(dupCode(c,did)) return toast('DOCUMENT CODE ALREADY EXISTS',1);
+  if(!c||!dt) return toast('Required',1);
+  if(dupCode(c,did)) return toast('CODE EXISTS',1);
   d.code=c; d.date=dt;
-  hide('ov2');
-  render();
-  toast('DOCUMENT UPDATED (press SAVE to sync)');
+  hide('ov2'); render();
+  toast('Updated · press SAVE to sync');
 }
 
 function delDoc(fid,did){
   const f = W.folders.find(f=>f.id==fid);
   const d = f.docs.find(x=>x.id==did);
-  ask('Delete document '+d.code+'?', ()=>{
-    f.docs = f.docs.filter(x=>x.id!=did);
-    render();
-    toast('DOCUMENT DELETED (press SAVE to sync)');
-  });
+  ask('Delete '+d.code+'?', ()=>{ f.docs = f.docs.filter(x=>x.id!=did); render(); toast('Deleted · press SAVE to sync'); });
 }
 
-/* Export / Import (simplified) */
 function expX(){
-  if(!window.XLSX){ toast('Excel library not loaded',1); return; }
-  const X=saved, H1=['Document Code','Document Date','Cabinet','Shelf','Folder ID','Folder Number','Folder Name','Confidentiality Level'];
+  if(!window.XLSX){ toast('Excel not loaded',1); return; }
   const a=[];
-  X.folders.forEach(f=>f.docs.forEach(d=>a.push({
-    'Document Code':d.code,'Document Date':d.date,'Cabinet':f.cab,'Shelf':SH[f.shelf],
-    'Folder ID':f.id,'Folder Number':f.no,'Folder Name':f.name,'Confidentiality Level':f.level||'Blank'
-  })));
-  const ws = XLSX.utils.json_to_sheet(a,{header:H1});
+  saved.folders.forEach(f=>f.docs.forEach(d=>a.push({'Document Code':d.code,'Document Date':d.date,'Cabinet':f.cab,'Shelf':SH[f.shelf],'Folder ID':f.id,'Folder Name':f.name})));
+  const ws = XLSX.utils.json_to_sheet(a);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'DOCUMENT LIST');
-  XLSX.writeFile(wb,'DOCUMENT_DC2_BACKUP.xlsx');
-  toast('EXPORT SUCCESSFULLY');
-}
-
-function tpl(){
-  if(!window.XLSX){ toast('Excel library not loaded',1); return; }
-  const wb=XLSX.utils.book_new();
-  const w1=XLSX.utils.aoa_to_sheet([['Document Code','Document Date','Folder ID']]);
-  XLSX.utils.book_append_sheet(wb,w1,'DOCUMENT LIST');
-  XLSX.writeFile(wb,'DOCUMENT_DC2_TEMPLATE.xlsx');
-  toast('TEMPLATE DOWNLOADED');
-}
-
-function impFile(inp){
-  toast('Import feature works the same - data will be saved to cloud after import + SAVE');
-  // keep original import logic if needed, but simplified for now
+  XLSX.utils.book_append_sheet(wb,ws,'DOCS');
+  XLSX.writeFile(wb,'DOCUMENT_DC2.xlsx');
+  toast('Exported');
 }
 
 /* START */
-loadFromCloud().then(()=>{
+loadFromCloud().then(() => {
   startRealtime();
-  render();
 });
 </script>
 </body>
