@@ -65,7 +65,7 @@ tr[data-id]{cursor:pointer}tr[data-id]:hover{background:#f0f3f5}
 #rt-status.off{background:#ffebee!important;color:#b71c1c!important}
 </style></head><body>
 <nav>
-<a data-v="dash" onclick="go('dash')">DASHBOARD</a><a data-v="cab" onclick="go('cab')">DOCUMENT CABINET</a><a data-v="search" onclick="go('search')">SEARCH DOCUMENT</a><a data-v="data" onclick="go('data')">DATA MANAGEMENT</a><a data-v="bk" onclick="go('bk')">BACKUP &amp; RESTORE</a><a data-v="set" onclick="go('set')">SETTINGS</a>
+<a data-v="dash" onclick="go('dash')">DASHBOARD</a><a data-v="cab" onclick="go('cab')">DOCUMENT CABINET</a><a data-v="search" onclick="go('search')">SEARCH DOCUMENT</a><a data-v="data" onclick="go('data')">DATA MANAGEMENT</a><a data-v="hist" onclick="go('hist')">HISTORY</a><a data-v="bk" onclick="go('bk')">BACKUP &amp; RESTORE</a><a data-v="set" onclick="go('set')">SETTINGS</a>
 <div class="bar" style="padding:8px 12px"><button id="lEN" onclick="setLang('en')">EN</button><button id="lTH" onclick="setLang('th')">TH</button></div>
 </nav>
 <div class="wrap"><header><h1 id="proj">DOCUMENT DC2</h1>
@@ -105,8 +105,8 @@ const x=[a,b].filter(x=>x&&x.folders&&x.folders.length==54).sort((x,y)=>y.ts-x.t
 if(x&&!x.settings.mig){if(x.settings.near==null)x.settings.near=61;if(x.settings.full==null)x.settings.full=91;x.settings.mig=1}return x}
 let saved=load()||fresh(),W=CL(saved),V='dash',CF=0,ZM=1,Q='',HIT=new Set(),editing=false,curF=null,DM={},askFn=null,IMP=null;
 const dirty=()=>JSON.stringify(W)!==JSON.stringify(saved);
-const TR={en:{dash:'DASHBOARD',cab:'DOCUMENT CABINET',search:'SEARCH DOCUMENT',data:'DATA MANAGEMENT',bk:'BACKUP & RESTORE',set:'SETTINGS',save:'SAVE CHANGES',disc:'DISCARD CHANGES',sav:'SAVED',uns:'UNSAVED CHANGES'},
-th:{dash:'แดชบอร์ด',cab:'ตู้เอกสาร',search:'ค้นหาเอกสาร',data:'จัดการข้อมูล',bk:'สำรองและกู้คืนข้อมูล',set:'ตั้งค่า',save:'บันทึกการแก้ไข',disc:'ยกเลิกการแก้ไข',sav:'บันทึกแล้ว',uns:'มีการแก้ไขที่ยังไม่บันทึก'}};
+const TR={en:{dash:'DASHBOARD',cab:'DOCUMENT CABINET',search:'SEARCH DOCUMENT',data:'DATA MANAGEMENT',hist:'HISTORY',bk:'BACKUP & RESTORE',set:'SETTINGS',save:'SAVE CHANGES',disc:'DISCARD CHANGES',sav:'SAVED',uns:'UNSAVED CHANGES'},
+th:{dash:'แดชบอร์ด',cab:'ตู้เอกสาร',search:'ค้นหาเอกสาร',data:'จัดการข้อมูล',hist:'ประวัติเอกสาร',bk:'สำรองและกู้คืนข้อมูล',set:'ตั้งค่า',save:'บันทึกการแก้ไข',disc:'ยกเลิกการแก้ไข',sav:'บันทึกแล้ว',uns:'มีการแก้ไขที่ยังไม่บันทึก'}};
 let LG='en';try{LG=localStorage.getItem('dc2_lang')==='th'?'th':'en'}catch(e){}
 const t=k=>TR[LG][k];
 function setLang(l){LG=l;try{localStorage.setItem('dc2_lang',l)}catch(e){}render()}
@@ -159,19 +159,27 @@ VW.cab=()=>ctl()+cabs();
 const toks=q=>q.toLowerCase().split(/[\s\-_\/]+/).filter(Boolean),nz=x=>x.toLowerCase().replace(/[^a-z0-9]/g,'');
 const mt=(c,q)=>{const l=c.toLowerCase();return toks(q).every(t=>l.includes(t))||nz(c).includes(nz(q))};
 const sc=(c,q)=>{const seg=c.toLowerCase().split(/[^a-z0-9]+/),t=toks(q);return t.filter(x=>seg.includes(x)).length*10+(c.toLowerCase().startsWith(q.toLowerCase())?5:0)};
-let SG=[],SGI=-1;
+let SG=[],SGI=-1;const SCR=()=>W.scrap||[];
 function sg(){const q=$('sq').value.trim().toLowerCase(),b=$('sg');SGI=-1;if(!q){SG=[];b.style.display='none';return}
-SG=allDocs().filter(x=>mt(x.d.code,q)).sort((x,y)=>(sc(y.d.code,q)-sc(x.d.code,q))||x.d.code.localeCompare(y.d.code,undefined,{numeric:true})).slice(0,12);
-b.innerHTML=SG.map((x,i)=>`<div onmousedown="pick(${i})"><span>${E(x.d.code)}</span><small>C${x.f.cab} ${x.f.shelf} NO.${x.f.no}</small></div>`).join('');b.style.display=SG.length?'block':'none'}
-function pick(i){$('sq').value=SG[i].d.code;$('sg').style.display='none';sub()}
+SG=[...allDocs().filter(x=>mt(x.d.code,q)).map(x=>({code:x.d.code,tag:`C${x.f.cab} ${x.f.shelf} NO.${x.f.no}`})),...SCR().filter(x=>mt(x.code,q)).map(x=>({code:x.code,tag:'SCRAPPED',scrap:1}))].sort((x,y)=>(sc(y.code,q)-sc(x.code,q))||x.code.localeCompare(y.code,undefined,{numeric:true})).slice(0,12);
+b.innerHTML=SG.map((x,i)=>`<div onmousedown="pick(${i})"><span>${E(x.code)}</span><small style="${x.scrap?'color:#b02a2a;font-weight:700':''}">${x.tag}</small></div>`).join('');b.style.display=SG.length?'block':'none'}
+function pick(i){$('sq').value=SG[i].code;$('sg').style.display='none';sub()}
 function skey(e){const n=SG.length,b=$('sg');if(e.key=='ArrowDown'||e.key=='ArrowUp'){if(!n)return;e.preventDefault();SGI=(SGI+(e.key=='ArrowDown'?1:-1)+n)%n;[...b.children].forEach((c,i)=>c.classList.toggle('on',i==SGI))}
 else if(e.key=='Enter'){if(SGI>=0)pick(SGI);else{b.style.display='none';sub()}}else if(e.key=='Escape')b.style.display='none'}
 document.addEventListener('click',e=>{const b=$('sg');if(b&&!e.target.closest('#sgw'))b.style.display='none'});
-function sub(){Q=$('sq').value.trim();if(!Q){toast('ENTER DOCUMENT CODE',1);return}const r=allDocs().filter(x=>mt(x.d.code,Q)),cs=new Set(r.map(x=>x.f.cab));
-CF=cs.size==1?[...cs][0]:0;V='search';render();if(!r.length)toast('DOCUMENT NOT FOUND',1);else setTimeout(()=>{const e=document.querySelector('.f.hit');if(e)e.scrollIntoView({block:'center',behavior:'smooth'})},60)}
-VW.search=()=>{const r=Q?allDocs().filter(x=>mt(x.d.code,Q)).sort((x,y)=>sc(y.d.code,Q)-sc(x.d.code,Q)):[];HIT=new Set(r.map(x=>x.f.id));
-let h=sbox();if(Q)h+=r.length?`<div class="card"><div class="found">DOCUMENT FOUND (${r.length})</div><table><tr><th>Document Code</th><th>Document Date</th><th>Cabinet</th><th>Shelf</th><th>Folder</th><th>Folder Name</th><th>Confidentiality</th></tr>${r.map(x=>`<tr data-id="${x.f.id}"><td>${E(x.d.code)}</td><td>${fd(x.d.date)}</td><td>${x.f.cab}</td><td>${SH[x.f.shelf]}</td><td>NO.${x.f.no}</td><td>${E(x.f.name)}</td><td>${E(x.f.level)||'Blank'}</td></tr>`).join('')}</table></div>`:'<div class="card"><div class="found">DOCUMENT NOT FOUND</div></div>';
+function sub(){Q=$('sq').value.trim();if(!Q){toast('ENTER DOCUMENT CODE',1);return}const r=allDocs().filter(x=>mt(x.d.code,Q)),s=SCR().filter(x=>mt(x.code,Q)),cs=new Set(r.map(x=>x.f.cab));
+CF=cs.size==1?[...cs][0]:0;V='search';render();if(!r.length&&!s.length)toast('DOCUMENT NOT FOUND',1);else if(!r.length)toast('DOCUMENT '+s[0].code+' SCRAPPED',1);else setTimeout(()=>{const e=document.querySelector('.f.hit');if(e)e.scrollIntoView({block:'center',behavior:'smooth'})},60)}
+VW.search=()=>{const r=Q?allDocs().filter(x=>mt(x.d.code,Q)).sort((x,y)=>sc(y.d.code,Q)-sc(x.d.code,Q)):[],s=Q?SCR().filter(x=>mt(x.code,Q)):[];HIT=new Set(r.map(x=>x.f.id));
+let h=sbox();if(Q){if(r.length)h+=`<div class="card"><div class="found">DOCUMENT FOUND (${r.length})</div><table><tr><th>Document Code</th><th>Document Date</th><th>Cabinet</th><th>Shelf</th><th>Folder</th><th>Folder Name</th><th>Confidentiality</th></tr>${r.map(x=>`<tr data-id="${x.f.id}"><td>${E(x.d.code)}</td><td>${fd(x.d.date)}</td><td>${x.f.cab}</td><td>${SH[x.f.shelf]}</td><td>NO.${x.f.no}</td><td>${E(x.f.name)}</td><td>${E(x.f.level)||'Blank'}</td></tr>`).join('')}</table></div>`;
+if(s.length)h+=`<div class="card"><div class="found" style="color:#b02a2a">DOCUMENT SCRAPPED (${s.length})</div><table><tr><th>Document Code</th><th>Status</th><th>Scrapped Date</th><th>Last Location</th></tr>${s.map(x=>`<tr><td>${E(x.code)}</td><td><b style="color:#b02a2a">SCRAPPED</b></td><td>${fd(x.scrapAt)}</td><td>Cabinet ${x.cab} / ${SH[x.shelf]} / NO.${x.no} ${E(x.name)}</td></tr>`).join('')}</table></div>`;
+if(!r.length&&!s.length)h+='<div class="card"><div class="found">DOCUMENT NOT FOUND</div></div>'}
 return h+ctl()+cabs()};
+let HM={};
+VW.hist=()=>{const q=HM.q||'',a=allDocs().map(x=>({code:x.d.code,date:x.d.date,st:'IN CABINET',at:'',cab:x.f.cab,shelf:x.f.shelf,no:x.f.no,name:x.f.name})),b=SCR().map(x=>({code:x.code,date:x.date,st:'SCRAPPED',at:x.scrapAt,cab:x.cab,shelf:x.shelf,no:x.no,name:x.name}));
+const r=[...a,...b].filter(x=>(!HM.st||x.st==HM.st)&&(!q||mt(x.code,q))).sort((x,y)=>x.code.localeCompare(y.code,undefined,{numeric:true}));
+return`<div class="stats"><div class="stat"><b>${a.length+b.length}</b><span>ALL DOCUMENTS RECORDED</span></div><div class="stat"><b>${a.length}</b><span>IN CABINET</span></div><div class="stat"><b>${b.length}</b><span>SCRAPPED</span></div></div>
+<div class="card"><h3>DOCUMENT HISTORY (${r.length})</h3><div class="bar">${sel('st',[['','All status'],['IN CABINET','In cabinet'],['SCRAPPED','Scrapped']],HM.st).replace(/DM\./g,'HM.')}<input placeholder="Search code" value="${E(q)}" onchange="HM.q=this.value;render()"><button onclick="HM={};render()">CLEAR</button></div>
+<table><tr><th>Document Code</th><th>Document Date</th><th>Status</th><th>Scrapped Date</th><th>Cabinet</th><th>Shelf</th><th>Folder</th></tr>${r.map(x=>`<tr><td>${E(x.code)}</td><td>${fd(x.date)}</td><td><b style="color:${x.st=='SCRAPPED'?'#b02a2a':'#2e7d4f'}">${x.st}</b></td><td>${x.at?fd(x.at):''}</td><td>${x.cab}</td><td>${SH[x.shelf]}</td><td>NO.${x.no} ${E(x.name)}</td></tr>`).join('')||'<tr><td colspan="7">No records</td></tr>'}</table></div>`};
 const sel=(id,opts,cur)=>`<select onchange="DM.${id}=this.value;render()">${opts.map(o=>`<option value="${E(o[0])}" ${cur==o[0]?'selected':''}>${E(o[1])}</option>`).join('')}</select>`;
 VW.data=()=>{const q=(DM.q||'').toLowerCase();let r=allDocs().filter(x=>(!DM.cab||x.f.cab==DM.cab)&&(!DM.shelf||x.f.shelf==DM.shelf)&&(!DM.fid||x.f.id==DM.fid)&&(!DM.lv||x.f.level==(DM.lv=='Blank'?'':DM.lv))&&(!DM.from||x.d.date>=DM.from)&&(!DM.to||x.d.date<=DM.to)&&(!q||x.d.code.toLowerCase().includes(q)));
 const sum=[1,2].flatMap(c=>'TMB'.split('').map(s=>`<tr><td>${c}</td><td>${SH[s]}</td><td>${W.folders.filter(f=>f.cab==c&&f.shelf==s).reduce((a,f)=>a+f.docs.length,0)}</td></tr>`)).join('');
@@ -234,7 +242,8 @@ function editDoc(fid,did){const d=W.folders.find(f=>f.id==fid).docs.find(x=>x.id
 show('ov2',`<div class="dlg"><h3>EDIT DOCUMENT</h3><label>Document Code</label><input id="dc" value="${E(d.code)}"><label>Document Date</label><input id="dd" type="date" value="${d.date}"><div class="bar"><button class="pri" onclick="okEdit('${fid}','${did}')">OK</button><button onclick="hide('ov2')">CANCEL</button></div></div>`)}
 function okEdit(fid,did){const d=W.folders.find(f=>f.id==fid).docs.find(x=>x.id==did),c=$('dc').value.trim(),dt=$('dd').value;if(!c)return toast('DOCUMENT CODE REQUIRED',1);if(!dt)return toast('DOCUMENT DATE REQUIRED',1);
 if(dupCode(c,did))return toast('DOCUMENT CODE ALREADY EXISTS',1);d.code=c;d.date=dt;hide('ov2');render();toast('DOCUMENT UPDATED (press SAVE to keep)')}
-function delDoc(fid,did){const f=W.folders.find(f=>f.id==fid),d=f.docs.find(x=>x.id==did);ask('Delete document '+d.code+'?',()=>{f.docs=f.docs.filter(x=>x.id!=did);render();toast('DOCUMENT DELETED (press SAVE to keep)')})}
+function delDoc(fid,did){const f=W.folders.find(f=>f.id==fid),d=f.docs.find(x=>x.id==did);ask('Delete document '+d.code+'? It will be kept in history as SCRAPPED.',()=>{const n=new Date();
+W.scrap=(W.scrap||[]).concat([{id:d.id,code:d.code,date:d.date,fid:f.id,cab:f.cab,shelf:f.shelf,no:f.no,name:f.name,level:f.level,scrapAt:iso(n.getFullYear(),n.getMonth()+1,n.getDate())}]);f.docs=f.docs.filter(x=>x.id!=did);render();toast('DOCUMENT '+d.code+' SCRAPPED (press SAVE to keep)')})}
 /* EXPORT / IMPORT */
 function expH(){if(dirty())toast('UNSAVED CHANGES are not included in the export',1);
 const h=SRC.replace(/(<script id="seed" type="application\/json">)[\s\S]*?(<\/script>)/,(m,a,b)=>a+JSON.stringify(saved).replace(/</g,'\\u003c')+b);
@@ -247,7 +256,7 @@ b.push({'Folder ID':f.id,'Cabinet':f.cab,'Shelf':SH[f.shelf],'Folder Number':f.n
 const s=X.settings,ws=(rows,H)=>{const w=XLSX.utils.json_to_sheet(rows,{header:H});w['!cols']=H.map(h=>({wch:Math.max(16,h.length+4)}));return w},
 w3=XLSX.utils.aoa_to_sheet([['Setting','Value'],['Project Name',s.name],['Near Full Threshold (%)',s.near==null?'NOT SET':s.near],['Full Threshold (%)',s.full==null?'NOT SET':s.full],['Date Format',s.fmt],['Default Folder Color',s.color],['Backup Before Import',s.bak?'YES':'NO'],['Last Saved',X.ts?new Date(X.ts).toISOString():'']]);w3['!cols']=[{wch:28},{wch:26}];
 const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws(a,H1),'DOCUMENT LIST');XLSX.utils.book_append_sheet(wb,ws(b,H2),'FOLDER INFORMATION');XLSX.utils.book_append_sheet(wb,w3,'SYSTEM SETTINGS');
-XLSX.writeFile(wb,'DOCUMENT_DC2_BACKUP.xlsx');toast('EXPORT SUCCESSFULLY')}
+{const HS=['Document Code','Document Date','Status','Scrapped Date','Cabinet','Shelf','Folder Number','Folder Name'];XLSX.utils.book_append_sheet(wb,ws((X.scrap||[]).map(x=>({'Document Code':x.code,'Document Date':x.date,'Status':'SCRAPPED','Scrapped Date':x.scrapAt,'Cabinet':x.cab,'Shelf':SH[x.shelf],'Folder Number':x.no,'Folder Name':x.name})),HS),'SCRAPPED DOCUMENTS')}XLSX.writeFile(wb,'DOCUMENT_DC2_BACKUP.xlsx');toast('EXPORT SUCCESSFULLY')}
 function tpl(){if(noX())return;const wb=XLSX.utils.book_new(),w1=XLSX.utils.aoa_to_sheet([['Document Code','Document Date','Folder ID']]);w1['!cols']=[{wch:24},{wch:16},{wch:14}];
 const w2=XLSX.utils.aoa_to_sheet([['INSTRUCTIONS'],['1. Fill sheet DOCUMENT LIST starting at row 2.'],['2. Document Code: required, must be unique across the whole system.'],['3. Document Date: required, format YYYY-MM-DD or DD/MM/YYYY.'],['4. Folder ID: required, copy from sheet FOLDER ID LIST (e.g. C2-T-05). Optional alternative: columns Cabinet, Shelf (TOP/MIDDLE/BOTTOM) and Folder Number.'],['5. Folders without a user-set capacity, or full folders, cannot receive imported documents.'],['6. After import preview and CONFIRM IMPORT, press SAVE CHANGES to store the data.']]);w2['!cols']=[{wch:110}];
 const w3=XLSX.utils.aoa_to_sheet([['Folder ID','Cabinet','Shelf','Folder Number','Folder Name'],...W.folders.map(f=>[f.id,f.cab,SH[f.shelf],f.no,f.name])]);w3['!cols']=[{wch:12},{wch:9},{wch:16},{wch:14},{wch:40}];
