@@ -70,7 +70,7 @@ tr[data-id]{cursor:pointer}tr[data-id]:hover{background:#f0f3f5}
 </nav>
 <div class="wrap"><header><h1 id="proj">DOCUMENT DC2</h1>
 <span id="rt-status" style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;margin-left:10px;background:#fff8e1;color:#f57f17">CONNECTING...</span>
-<span class="sp"></span><span id="hdr-st" class="ok">SAVED</span><button id="bSave" class="pri" onclick="save()">SAVE CHANGES</button><button id="bDisc" onclick="discard()">DISCARD CHANGES</button></header><main id="main"></main></div>
+<span class="sp"></span><button id="bLock" onclick="lockBtn()">UNLOCK EDIT</button><span id="hdr-st" class="ok">SAVED</span><button id="bSave" class="pri" onclick="save()">SAVE CHANGES</button><button id="bDisc" onclick="discard()">DISCARD CHANGES</button></header><main id="main"></main></div>
 <div id="ov1"></div><div id="ov2"></div><div id="toast"></div>
 <script id="seed" type="application/json">null</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -140,7 +140,7 @@ function discard(){const go=()=>{W=CL(saved);editing=false;render();toast('CHANG
 addEventListener('beforeunload',e=>{if(dirty()){e.preventDefault();e.returnValue=''}});
 /* VIEWS */
 function go(v){V=v;if(v!='search')HIT=new Set();render();scrollTo(0,0)}
-function render(){const d=dirty();$('hdr-st').className=d?'bad':'ok';$('hdr-st').textContent=d?t('uns'):t('sav');applyLang();
+function render(){const d=dirty();$('hdr-st').className=d?'bad':'ok';$('hdr-st').textContent=d?t('uns'):t('sav');applyLang();lockUI();
 document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.dataset.v==V));$('proj').textContent=W.settings.name;$('main').innerHTML=VW[V]();if(curF)fmodal()}
 function fh(f){const s=st(f),n=f.name.length;return`<div class="f${HIT.has(f.id)?' hit':''}" data-id="${f.id}" style="--c:${f.color||W.settings.color}" title="${E(f.name)} - ${s.t}"><i class="dot ${s.k}"></i><div class="lv ${f.level=='SECRET'?'sec':''}">${E(f.level)||'&nbsp;'}</div><div class="nm"><span style="font-size:${n>24?11:n>14?13:16}px">${E(f.name)}</span></div><div class="no">NO.${f.no}</div></div>`}
 function ctl(){return`<div class="bar"><b>VIEW</b>`+[[0,'ALL CABINETS'],[1,'CABINET 1'],[2,'CABINET 2']].map(a=>`<button class="${CF==a[0]?'pri':''}" onclick="CF=${a[0]};render()">${a[1]}</button>`).join('')+`<span class="sp"></span><button onclick="ZM=Math.max(.6,ZM-.1);render()">ZOOM OUT</button><button onclick="ZM=Math.min(1.6,ZM+.1);render()">ZOOM IN</button></div>
@@ -308,4 +308,14 @@ hide('ov2');render();toast('IMPORT SUCCESSFULLY - press SAVE CHANGES to keep')}
     })
     .subscribe(status => { if(status==='SUBSCRIBED') updateStatus(true); });
 })();
+
+/* === EDIT ACCESS CODE === */
+const CODES=['23241','69f22'];let UNL=false,GF=null;try{UNL=sessionStorage.getItem('dc2_unl')=='1'}catch(e){}
+function gate(fn){GF=fn;show('ov2',`<div class="dlg"><h3>EDIT ACCESS CODE</h3><p class="mt">${LG=='th'?'กรอกรหัสเพื่อเข้าแก้ไขข้อมูล':'Enter the access code to edit.'}</p><input id="gc" type="password" autocomplete="off" onkeydown="if(event.key=='Enter')gok()"><div class="bar"><button class="pri" onclick="gok()">OK</button><button onclick="hide('ov2')">CANCEL</button></div></div>`);setTimeout(()=>{const i=$('gc');if(i)i.focus()},50)}
+function gok(){const v=$('gc').value.trim().toLowerCase();if(!CODES.includes(v)){toast('WRONG CODE',1);$('gc').value='';return}
+UNL=true;try{sessionStorage.setItem('dc2_unl','1')}catch(e){}hide('ov2');lockUI();toast('EDIT UNLOCKED');const f=GF;GF=null;if(f)f()}
+function lockBtn(){if(UNL){UNL=false;try{sessionStorage.removeItem('dc2_unl')}catch(e){}lockUI();toast('EDIT LOCKED')}else gate(null)}
+function lockUI(){const b=$('bLock');if(!b)return;b.textContent=UNL?(LG=='th'?'ล็อกการแก้ไข':'LOCK EDIT'):(LG=='th'?'ปลดล็อกการแก้ไข':'UNLOCK EDIT');b.style.borderColor=UNL?'#2e7d4f':'#b02a2a';b.style.color=UNL?'#2e7d4f':'#b02a2a'}
+['save','addDoc','addMany','editF','editDoc','delDoc','saveSet','restore','impFile','confImp'].forEach(n=>{const o=window[n];window[n]=function(){const a=arguments,me=this;if(UNL)return o.apply(me,a);gate(()=>o.apply(me,a))}});
+lockUI();
 </script></body></html>
